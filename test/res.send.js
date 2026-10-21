@@ -6,6 +6,7 @@ var express = require('..');
 var methods = require('../lib/utils').methods;
 var request = require('supertest');
 var utils = require('./support/utils');
+var vm = require('node:vm');
 
 var shouldSkipQuery = require('./support/utils').shouldSkipQuery
 
@@ -230,6 +231,55 @@ describe('res', function(){
       .expect(200, 'hey', done)
     })
   })
+
+  describe('.send(DataView)', function () {
+    it('should send only the bytes covered by the view', function (done) {
+      var app = express();
+      var bytes = Uint8Array.from([9, 1, 2, 3, 8]);
+
+      app.use(function (req, res) {
+        res.send(new DataView(bytes.buffer, 1, 3));
+      });
+
+      request(app)
+        .get('/')
+        .expect(200)
+        .expect('Content-Type', 'application/octet-stream')
+        .expect('Content-Length', '3')
+        .expect(utils.shouldHaveBody(Buffer.from([1, 2, 3])))
+        .end(done);
+    });
+
+    it('should preserve an explicit Content-Type', function (done) {
+      var app = express();
+      var bytes = Uint8Array.from([104, 101, 121]);
+
+      app.use(function (req, res) {
+        res.type('text/plain').send(new DataView(bytes.buffer));
+      });
+
+      request(app)
+        .get('/')
+        .expect(200)
+        .expect('Content-Type', 'text/plain; charset=utf-8')
+        .expect('hey', done);
+    });
+
+    it('should accept a DataView from another realm', function (done) {
+      var app = express();
+      var view = vm.runInNewContext('new DataView(Uint8Array.from([5, 6, 7]).buffer, 1, 2)');
+
+      app.use(function (req, res) {
+        res.send(view);
+      });
+
+      request(app)
+        .get('/')
+        .expect(200)
+        .expect(utils.shouldHaveBody(Buffer.from([6, 7])))
+        .end(done);
+    });
+  });
 
   describe('.send(Object)', function(){
     it('should send as application/json', function(done){
