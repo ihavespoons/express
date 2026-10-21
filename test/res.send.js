@@ -5,6 +5,7 @@ const { Buffer } = require('node:buffer');
 var express = require('..');
 var methods = require('../lib/utils').methods;
 var request = require('supertest');
+var runInNewContext = require('node:vm').runInNewContext;
 var utils = require('./support/utils');
 
 var shouldSkipQuery = require('./support/utils').shouldSkipQuery
@@ -230,6 +231,51 @@ describe('res', function(){
       .expect(200, 'hey', done)
     })
   })
+
+  describe('.send(ArrayBuffer)', function(){
+    it('should send raw ArrayBuffer bytes', function(done){
+      var app = express();
+      var bytes = Buffer.from([0, 1, 2, 127, 255]);
+      app.use(function(req, res){
+        res.send(Uint8Array.from(bytes).buffer);
+      });
+
+      request(app)
+        .get('/')
+        .expect('Content-Type', 'application/octet-stream')
+        .expect('Content-Length', String(bytes.length))
+        .expect(200)
+        .expect(utils.shouldHaveBody(bytes))
+        .end(done);
+    });
+
+    it('should send SharedArrayBuffer bytes', function(done){
+      var app = express();
+      var buffer = new SharedArrayBuffer(3);
+      new Uint8Array(buffer).set([3, 4, 5]);
+      app.use(function(req, res){ res.send(buffer); });
+
+      request(app)
+        .get('/')
+        .expect('Content-Type', 'application/octet-stream')
+        .expect(200)
+        .expect(utils.shouldHaveBody(Buffer.from([3, 4, 5])))
+        .end(done);
+    });
+
+    it('should accept an ArrayBuffer from another realm and preserve Content-Type', function(done){
+      var app = express();
+      var buffer = runInNewContext('Uint8Array.from([6, 7]).buffer');
+      app.use(function(req, res){ res.type('text/plain').send(buffer); });
+
+      request(app)
+        .get('/')
+        .expect('Content-Type', 'text/plain; charset=utf-8')
+        .expect(200)
+        .expect(utils.shouldHaveBody(Buffer.from([6, 7])))
+        .end(done);
+    });
+  });
 
   describe('.send(Object)', function(){
     it('should send as application/json', function(done){
